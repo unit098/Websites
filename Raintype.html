@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>RainType - Typing Game</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            touch-action: manipulation; /* Prevents double-tap zoom, etc. */
+        }
+
+        .glassmorphic-bar {
+            background-color: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .glassmorphic-modal-bg { /* For the overlay background */
+             background-color: rgba(0, 0, 0, 0.5);
+             backdrop-filter: blur(5px);
+            -webkit-backdrop-filter: blur(5px);
+        }
+
+        .glassmorphic-modal-content {
+            background-color: rgba(30, 41, 59, 0.6); /* slate-800 with opacity */
+            backdrop-filter: blur(15px);
+            -webkit-backdrop-filter: blur(15px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
+        }
+
+        .keyboard-key {
+            background-color: rgba(255, 255, 255, 0.15);
+            /* backdrop-filter: blur(5px); /* Can be performance heavy for many keys */
+            /* -webkit-backdrop-filter: blur(5px); */
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            transition: background-color 0.1s ease, transform 0.05s ease;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+
+        .keyboard-key:active {
+            background-color: rgba(255, 255, 255, 0.3);
+            transform: translateY(1px);
+        }
+        
+        .falling-word {
+            color: #E0F2FE; /* light sky blue / almost white */
+            text-shadow: 0 0 3px #BFDBFE, /* blue-200 */
+                         0 0 6px #60A5FA, /* blue-400 */
+                         0 0 10px #3B82F6; /* blue-500 */
+            pointer-events: none; /* So they don't interfere with anything */
+        }
+
+        #livesDisplay .life-heart {
+            color: #F87171; /* red-400 */
+            text-shadow: 0 0 5px #EF4444; /* red-500 */
+        }
+        #livesDisplay .life-heart-lost {
+            color: rgba(255,255,255,0.3);
+        }
+
+        /* Prevent text selection during gameplay */
+        .noselect {
+            -webkit-touch-callout: none; /* iOS Safari */
+            -webkit-user-select: none; /* Safari */
+            -khtml-user-select: none; /* Konqueror HTML */
+            -moz-user-select: none; /* Old versions of Firefox */
+            -ms-user-select: none; /* Internet Explorer/Edge */
+            user-select: none; /* Non-prefixed version, currently supported by Chrome, Edge, Opera and Firefox */
+        }
+
+    </style>
+</head>
+<body class="bg-gradient-to-br from-blue-700 to-indigo-900 text-white overflow-hidden h-screen select-none">
+
+    <div id="appContainer" class="h-full grid grid-rows-[1fr_auto_auto]">
+        <!-- Game Area -->
+        <div id="gameArea" class="relative overflow-hidden">
+            <!-- Status Bar (now inside gameArea) -->
+            <div id="statusBar" class="absolute top-0 left-0 w-full p-3 sm:p-4 flex justify-between items-center glassmorphic-bar z-10">
+                <div>Score: <span id="scoreDisplay" class="font-bold">0</span></div>
+                <div id="livesDisplay" class="flex items-center text-xl sm:text-2xl"></div>
+            </div>
+            <!-- Words will be appended here -->
+        </div>
+        <!-- Current Typed Word Display -->
+        <div id="typedWordDisplayContainer" class="p-2 sm:p-3 text-center glassmorphic-bar">
+            <input
+                id="typedWordInput"
+                type="text"
+                class="text-xl sm:text-2xl tracking-widest min-h-[2rem] sm:min-h-[2.5rem] inline-block align-middle font-mono bg-transparent border-none outline-none text-white text-center w-full"
+                autocomplete="off"
+                autocorrect="off"
+                spellcheck="false"
+                maxlength="20"
+                inputmode="text"
+            />
+        </div>
+        <!-- Virtual Keyboard -->
+        <div id="virtualKeyboardContainer" class="bg-slate-900/30 backdrop-blur-sm p-1 sm:p-2">
+            <div id="virtualKeyboard" class="max-w-xl mx-auto space-y-1 sm:space-y-2">
+                <!-- Keyboard rows will be generated here -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Start Modal -->
+    <div id="startModal" class="absolute inset-0 glassmorphic-modal-bg flex flex-col justify-center items-center z-50">
+        <div class="p-6 sm:p-8 rounded-xl shadow-xl text-center glassmorphic-modal-content w-11/12 max-w-md">
+            <h1 class="text-3xl sm:text-4xl font-bold mb-2 text-sky-300">RainType</h1>
+            <p class="text-lg sm:text-xl mb-6 text-sky-100">Type the falling words before they hit bottom!</p>
+            <button id="startButton" class="bg-green-500 hover:bg-green-600 active:bg-green-700 text-white font-bold py-3 px-8 rounded-lg text-xl sm:text-2xl transition-colors shadow-lg focus:outline-none focus:ring-2 focus:ring-green-400 focus:ring-opacity-75">
+                Start Game
+            </button>
+        </div>
+    </div>
+    
+    <!-- Game Over Modal -->
+    <div id="gameOverModal" class="hidden absolute inset-0 glassmorphic-modal-bg flex-col justify-center items-center z-50">
+        <div class="p-6 sm:p-8 rounded-xl shadow-xl text-center glassmorphic-modal-content w-11/12 max-w-md">
+            <h2 class="text-3xl sm:text-4xl font-bold mb-4 text-sky-300">Game Over!</h2>
+            <p class="text-xl sm:text-2xl mb-2 text-sky-100">Final Score: <span id="finalScoreDisplay" class="font-bold">0</span></p>
+            <button id="restartButton" class="mt-6 bg-blue-500 hover:bg-blue-600 active:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg text-lg sm:text-xl transition-colors shadow-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-opacity-75">
+                Play Again
+            </button>
+        </div>
+    </div>
+
+<script>
+    // --- Constants ---
+    const WORD_LIST = [
+        "game", "play", "type", "fast", "word", "fall", "blue", "code", "rain", "drop",
+        "time", "score", "live", "zone", "jump", "quiz", "exam", "test", "move", "flow",
+        "easy", "hard", "next", "font", "icon", "java", "html", "css", "grid", "flex",
+        "pink", "red", "sky", "star", "moon", "sun", "tree", "leaf", "bird", "fish",
+        "cat", "dog", "house", "home", "work", "city", "town", "road", "path", "idea",
+        "apple", "grape", "melon", "lemon", "peach", "water", "fire", "earth", "wind",
+        "book", "read", "page", "story", "tale", "myth", "fact", "data", "info", "news",
+        "hello", "world", "neon", "glass", "style", "theme", "mode", "dark", "light", "quick",
+        "brown", "fox", "lazy", "jumps", "over", "agile", "swift", "blink", "power", "dream"
+    ];
+
+    const KEYBOARD_LAYOUT = [
+        "qwertyuiop",
+        "asdfghjkl",
+        "zxcvbnm←"
+    ];
+
+    const INITIAL_LIVES = 3;
+    const INITIAL_FALL_SPEED = 0.5; // Pixels per frame, adjusts with screen height
+    const FALL_SPEED_INCREMENT = 0.05; // Increment per successful word
+    const INITIAL_GENERATION_RATE = 2200; // Milliseconds
+    const GENERATION_RATE_DECREMENT = 50; // Milliseconds
+    const MIN_GENERATION_RATE = 700; // Milliseconds
+
+    // --- DOM Elements ---
+    const appContainer = document.getElementById('appContainer');
+    const gameArea = document.getElementById('gameArea');
+    const scoreDisplay = document.getElementById('scoreDisplay');
+    const livesDisplay = document.getElementById('livesDisplay');
+    const typedWordDisplay = document.getElementById('typedWordDisplay');
+    const virtualKeyboardContainer = document.getElementById('virtualKeyboard');
+    
+    const startModal = document.getElementById('startModal');
+    const startButton = document.getElementById('startButton');
+    const gameOverModal = document.getElementById('gameOverModal');
+    const finalScoreDisplay = document.getElementById('finalScoreDisplay');
+    const restartButton = document.getElementById('restartButton');
+    const typedWordInput = document.getElementById('typedWordInput');
+
+    // Update input when game state changes
+function updateTypedWordElement() {
+    typedWordInput.value = currentTypedWord;
+}
+
+// Listen for input changes
+typedWordInput.addEventListener('input', (e) => {
+    // Only allow a-z, ignore other characters
+    let filtered = e.target.value.replace(/[^a-zA-Z]/g, '').toLowerCase().slice(0, 20);
+    currentTypedWord = filtered;
+    updateTypedWordElement();
+    checkWordMatchAndClear();
+});
+
+// Optional: Focus input when container is tapped (for mobile)
+document.getElementById('typedWordDisplayContainer').addEventListener('click', () => {
+    typedWordInput.focus();
+});
+typedWordInput.addEventListener('focus', () => {
+    if (isMobileDevice()) {
+        document.getElementById('virtualKeyboardContainer').style.display = 'none';
+    }
+});
+typedWordInput.addEventListener('blur', () => {
+    if (isMobileDevice()) {
+        setTimeout(() => {
+            document.getElementById('virtualKeyboardContainer').style.display = '';
+        }, 1000);
+    }
+});
+function isMobileDevice() {
+    return /Mobi|Android|iPhone|iPad|iPod|Opera Mini|IEMobile|WPDesktop/i.test(navigator.userAgent);
+}
+
+    // --- Game State Variables ---
+    let score = 0;
+    let lives = INITIAL_LIVES;
+    let activeWords = []; // { text: "word", y: 0, element: DOMElement }
+    let currentTypedWord = "";
+    
+    let currentFallSpeed = INITIAL_FALL_SPEED;
+    let currentGenerationRate = INITIAL_GENERATION_RATE;
+
+    let gameLoopId = null;
+    let wordGenerationIntervalId = null;
+    let isGameOver = true; // Starts as game over, waiting for Start button
+    let gameAreaHeight = 0; // To be calculated on start/resize
+
+
+    // --- Initialization Functions ---
+    function createVirtualKeyboard() {
+        virtualKeyboardContainer.innerHTML = ''; // Clear previous keyboard if any
+        KEYBOARD_LAYOUT.forEach(rowString => {
+            const rowDiv = document.createElement('div');
+            rowDiv.className = 'flex justify-center space-x-1 sm:space-x-1.5';
+            
+            rowString.split('').forEach(char => {
+                const button = document.createElement('button');
+                button.className = 'keyboard-key flex-1 p-2 sm:p-3 rounded-md text-sm sm:text-lg md:text-xl font-medium focus:outline-none';
+                button.textContent = char;
+                if (char === '←') {
+                    button.dataset.key = 'Backspace';
+                    button.classList.add('text-amber-400', 'sm:px-4'); // Style backspace differently
+                } else {
+                    button.dataset.key = char;
+                }
+                button.addEventListener('click', () => handleVirtualKeyPress(button.dataset.key));
+                rowDiv.appendChild(button);
+            });
+            virtualKeyboardContainer.appendChild(rowDiv);
+        });
+    }
+
+    function resetGameState() {
+        score = 0;
+        lives = INITIAL_LIVES;
+        currentTypedWord = "";
+        activeWords.forEach(wordObj => wordObj.element.remove());
+        activeWords = [];
+        isGameOver = false;
+
+        currentFallSpeed = INITIAL_FALL_SPEED * (gameAreaHeight / 500); // Scale speed with height
+        currentGenerationRate = INITIAL_GENERATION_RATE;
+
+        updateScoreDisplay();
+        updateLivesDisplay();
+        updateTypedWordElement();
+        
+        gameOverModal.classList.add('hidden');
+        gameOverModal.classList.remove('flex');
+        startModal.classList.add('hidden');
+        startModal.classList.remove('flex');
+    }
+
+    // --- UI Update Functions ---
+    function updateScoreDisplay() {
+        scoreDisplay.textContent = score;
+    }
+
+    function updateLivesDisplay() {
+        livesDisplay.innerHTML = ''; // Clear previous hearts
+        for (let i = 0; i < INITIAL_LIVES; i++) {
+            const heartSpan = document.createElement('span');
+            heartSpan.textContent = '❤';
+            heartSpan.classList.add(i < lives ? 'life-heart' : 'life-heart-lost');
+            livesDisplay.appendChild(heartSpan);
+        }
+    }
+
+    function updateTypedWordElement() {
+        typedWordInput.value = currentTypedWord;
+    }
+
+    // --- Game Logic Functions ---
+    function spawnWord() {
+        if (isGameOver) return;
+
+        const text = WORD_LIST[Math.floor(Math.random() * WORD_LIST.length)];
+        const wordElement = document.createElement('div');
+        wordElement.textContent = text;
+        wordElement.className = 'falling-word absolute text-lg sm:text-xl md:text-2xl font-medium';
+        
+        // Set initial position - ensure it's not off screen horizontally
+        wordElement.style.top = `-${Math.random() * 20 + 20}px`; // Start slightly off-screen above
+        gameArea.appendChild(wordElement); // Append to calculate offsetWidth
+
+        const maxLeft = gameArea.clientWidth - wordElement.offsetWidth - 10; // 10px padding
+        const randomLeft = Math.max(5, Math.random() * maxLeft);
+        wordElement.style.left = `${randomLeft}px`;
+        
+        activeWords.push({ text, y: parseFloat(wordElement.style.top), element: wordElement });
+    }
+
+    function handleVirtualKeyPress(key) {
+        if (isGameOver) return;
+
+        if (key === 'Backspace') {
+            currentTypedWord = currentTypedWord.slice(0, -1);
+        } else if (currentTypedWord.length < 20) { // Max word length to type
+            currentTypedWord += key.toLowerCase();
+        }
+        updateTypedWordElement();
+        checkWordMatchAndClear();
+    }
+
+    function checkWordMatchAndClear() {
+        const matchedWordIndex = activeWords.findIndex(wordObj => wordObj.text === currentTypedWord);
+        if (matchedWordIndex !== -1) {
+            const matchedWord = activeWords[matchedWordIndex];
+            
+            score += matchedWord.text.length * 10; // Score based on word length
+            updateScoreDisplay();
+
+            // Visual feedback for matched word (optional: can add animation here)
+            matchedWord.element.remove();
+            activeWords.splice(matchedWordIndex, 1);
+            
+            currentTypedWord = "";
+            updateTypedWordElement();
+
+            // Increase difficulty
+            currentFallSpeed += FALL_SPEED_INCREMENT * (gameAreaHeight / 500);
+            currentGenerationRate = Math.max(MIN_GENERATION_RATE, currentGenerationRate - GENERATION_RATE_DECREMENT);
+            
+            clearInterval(wordGenerationIntervalId);
+            wordGenerationIntervalId = setInterval(spawnWord, currentGenerationRate);
+        }
+    }
+
+    function loseLife() {
+        lives--;
+        updateLivesDisplay();
+        // Optional: Add visual feedback like screen flash
+        gameArea.classList.add('animate-pulse', 'bg-red-500/50');
+        setTimeout(() => gameArea.classList.remove('animate-pulse', 'bg-red-500/50'), 200);
+
+
+        if (lives <= 0) {
+            doGameOver();
+        }
+    }
+
+    function doGameOver() {
+        isGameOver = true;
+        clearInterval(wordGenerationIntervalId);
+        cancelAnimationFrame(gameLoopId);
+        
+        finalScoreDisplay.textContent = score;
+        gameOverModal.classList.remove('hidden');
+        gameOverModal.classList.add('flex');
+    }
+
+    // --- Game Loop ---
+    function gameScreenUpdate() {
+        if (isGameOver) return;
+
+        activeWords.forEach((wordObj, index) => {
+            wordObj.y += currentFallSpeed;
+            wordObj.element.style.transform = `translateY(${wordObj.y}px)`;
+
+            if (wordObj.y + wordObj.element.offsetHeight > gameAreaHeight + wordObj.element.offsetHeight/2) { // Word passed bottom
+                wordObj.element.remove();
+                activeWords.splice(index, 1); // Remove from array
+                loseLife();
+            }
+        });
+        
+        if (!isGameOver) { // Only continue loop if game is not over
+            gameLoopId = requestAnimationFrame(gameScreenUpdate);
+        }
+    }
+
+    function startGame() {
+        gameAreaHeight = gameArea.clientHeight; // Update height
+        resetGameState();
+        
+        // Start game loops
+        gameLoopId = requestAnimationFrame(gameScreenUpdate);
+        if (wordGenerationIntervalId) clearInterval(wordGenerationIntervalId);
+        wordGenerationIntervalId = setInterval(spawnWord, currentGenerationRate);
+    }
+
+    // --- Event Listeners ---
+    document.addEventListener('DOMContentLoaded', () => {
+        createVirtualKeyboard();
+        updateLivesDisplay(); // Show initial hearts in "disabled" state on start screen
+        // Game does not start until button is pressed
+        startModal.classList.remove('hidden');
+        startModal.classList.add('flex');
+    });
+
+    // Listen for physical keyboard input
+    document.addEventListener('keydown', (e) => {
+        if (isGameOver) return;
+        // Only allow a-z and Backspace
+        if (/^[a-zA-Z]$/.test(e.key)) {
+            handleVirtualKeyPress(e.key.toLowerCase());
+            e.preventDefault();
+        } else if (e.key === "Backspace") {
+            handleVirtualKeyPress("Backspace");
+            e.preventDefault();
+        } else if (e.key === "Enter") {
+            e.preventDefault();
+        }
+    });
+
+    startButton.addEventListener('click', startGame);
+    restartButton.addEventListener('click', startGame);
+    
+    // Optional: Recalculate gameAreaHeight on resize to adapt speeds slightly
+    // This is a simple version; more complex resize handling might be needed for drastic changes
+    window.addEventListener('resize', () => {
+        if (!isGameOver) { // Only if game is active, or always to prepare
+            gameAreaHeight = gameArea.clientHeight;
+             // Potentially adjust speeds if needed, or just let current game continue with old height reference
+        }
+        createVirtualKeyboard(); // Re-create keyboard for new screen size
+    });
+
+    // Pause/resume word spawning when tab visibility changes
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+            // Pause word spawning
+            if (wordGenerationIntervalId) clearInterval(wordGenerationIntervalId);
+        } else if (!isGameOver) {
+            // Resume word spawning
+            if (wordGenerationIntervalId) clearInterval(wordGenerationIntervalId);
+            wordGenerationIntervalId = setInterval(spawnWord, currentGenerationRate);
+        }
+    });
+
+</script>
+</body>
+</html>
